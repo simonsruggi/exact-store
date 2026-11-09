@@ -1,0 +1,86 @@
+// The pieces each screen repeats: a product card, a cart line, an order row, a price row.
+use Product, Order, money, plural, statusLabel, statusColor from "./model.contract"
+
+// A product in the grid: its photo and name open it, the bag button adds one.
+component ProductCard
+  props
+    p: Product
+    add: action
+  view
+    column role="listitem" gap=8 min-width=0 testId=`card-${p.slug}`
+      link href=`/product/${p.slug}` aria-label=p.name text-decoration="none" color="inherit" testId=`open-${p.slug}`
+        image p.image alt=p.name aspect-ratio="1" width="100%" object-fit="cover" border-radius=12 background-color="-exact-secondary-background"
+      row gap=8 align-items="flex-start"
+        column flex=1 min-width=0 gap=2
+          link href=`/product/${p.slug}` text-decoration="none" color="inherit"
+            text p.name font="-exact-subheadline" font-weight=600 white-space="nowrap" overflow="hidden" text-overflow="ellipsis"
+          row gap=6 align-items="baseline"
+            text money(p.priceCents) font="-exact-subheadline" font-variant-numeric="tabular-nums" testId=`price-${p.slug}`
+            if p.compareCents > 0
+              text money(p.compareCents) font="-exact-caption1" color="-exact-secondary-label" text-decoration="line-through"
+        button press=add disabled=(p.stock <= 0) aria-label=`Add ${p.name} to cart` buttonStyle="bordered" testId=`add-${p.slug}`
+          image "symbol:cart"
+
+// A line of the cart: name, variant, unit price, a stepper and its total.
+component CartLine
+  props
+    name: string
+    variant: string
+    image: string
+    unit: number
+    qty: number
+    max: number
+    less: action
+    more: action
+    remove: action
+    tid: string
+  view
+    row gap=12 align-items="center" delete=remove testId=`line-${tid}`
+      image image alt="" width=64 height=64 object-fit="cover" border-radius=8 flex-shrink=0
+      column flex=1 min-width=0 gap=4
+        text name font-weight=600
+        if variant != ""
+          text variant font="-exact-footnote" color="-exact-secondary-label"
+        text money(unit) font="-exact-footnote" color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+        row gap=8 align-items="center"
+          button press=less disabled=(qty <= 1) aria-label="One fewer" buttonStyle="bordered" testId=`less-${tid}`
+            image "symbol:minus"
+          text `${qty}` font-variant-numeric="tabular-nums" min-width=24 text-align="center" testId=`qty-${tid}`
+          button press=more disabled=(qty >= max) aria-label="One more" buttonStyle="bordered" testId=`more-${tid}`
+            image "symbol:add"
+          button press=remove destructive=true buttonStyle="plain" testId=`remove-${tid}`
+            text "Remove"
+      text money(unit * qty) font-weight=600 font-variant-numeric="tabular-nums" testId=`total-${tid}`
+
+// A label and an amount, as a summary's row.
+component Amount
+  props
+    label: string
+    value: string
+    tid: string
+  view
+    row justify-content="space-between" gap=8
+      text label color="-exact-secondary-label"
+      text value font-variant-numeric="tabular-nums" testId=tid
+
+component StatusBadge
+  props
+    status: string
+  view
+    text statusLabel(status) font="-exact-caption1" font-weight=600 color=statusColor(status) testId="status-badge"
+
+// An order in a list: its number and date, its status and total; the row opens it.
+component OrderRow
+  props
+    o: Order
+    placedOn: string
+  view
+    link href=`/orders/${o.id}` testId=`order-${o.number}`
+      row flex=1 min-width=0 gap=12 align-items="center"
+        column flex=1 min-width=0 gap=2
+          text o.number font-weight=600
+          text `${placedOn} · ${plural(o.items.length, "item", "items")}` font="-exact-footnote" color="-exact-secondary-label"
+        column align-items="flex-end" gap=2
+          text money(o.totalCents) font-variant-numeric="tabular-nums"
+          StatusBadge(status=o.status)
+      image "symbol:forward-chevron"

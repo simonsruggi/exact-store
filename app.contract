@@ -1,0 +1,668 @@
+// Exact Store, ported from next-store's demo (Next.js + Zustand) to Exact: a shop, a cart and checkout,
+// the shopper's orders and the store's dashboard. The cart is the person's (`persist`); products and
+// orders are app.ts's, kept in a file on the device. No payment is taken.
+use Time, Category, Product, Order, CheckoutForm, Reply from "./model.contract"
+use money, plural, part, keyOf, qtyOf, withQty, merged, productOf, bySlug, nameOf, unitCents, stockOf, variantOr, lineCents, lineMax, subtotalOf, countAll, shippingFor, feeFor, paymentLabel, liveRevenue from "./model.contract"
+use ProductCard, CartLine, Amount, StatusBadge, OrderRow from "./parts.contract"
+use EmptyState from "exact:content"
+
+routes nav
+  tab shop "/"
+    product "/product/:slug"
+  tab cart "/cart"
+    checkout "/checkout"
+  tab orders "/orders"
+    order "/orders/:id"
+  tab dashboard "/dashboard"
+
+component App
+  state cart: string [] = [] persist
+  state category = ""
+  state sort = ""
+  state search = ""
+  state picked = ""
+  state qty = 1
+  state added = false
+  state addedN = 0
+  state coEmail = ""
+  state coName = "" persist
+  state coAddress = "" persist
+  state coCity = "" persist
+  state coZip = "" persist
+  state coPhone = "" persist
+  state coPayment = "card"
+  state now = 0
+
+  resource time = exactTime() as shape Time
+  resource categories = loadCategories() as shape Category[] else empty()
+  resource products = loadProducts() as shape Product[] else empty()
+  resource orders = loadOrders() as shape Order[] else empty()
+  mutation placed as shape Reply refreshes orders then afterOrder
+  mutation changed as shape Reply refreshes orders, products
+
+  derive needle = search.trim().toLowerCase()
+  derive inShop = products.filter(p => p.active and (category == "" or p.categoryId == category) and (needle == "" or p.name.toLowerCase().includes(needle)))
+  derive shown = sort == "price_asc" ? sortBy(inShop, p => p.priceCents) : sort == "price_desc" ? sortBy(inShop, p => p.priceCents, "desc") : sort == "name" ? sortBy(inShop, p => p.name) : inShop
+  derive cartCount = countAll(cart)
+  derive subtotal = subtotalOf(products, cart)
+  derive shipping = shippingFor(subtotal)
+  derive fee = feeFor(coPayment)
+  derive total = subtotal + shipping + fee
+  derive formReady = coEmail.trim().includes("@") and coName.trim() != "" and coAddress.trim() != "" and coCity.trim() != "" and coZip.trim() != ""
+  derive placeError = match placed { case some(r) => r.error, case none => "" }
+  derive clock = time.epochAtZero + now
+
+  task added_flash when added key = addedN
+    after(1500, clearAdded)
+
+  action pick(name: string)
+    nav = select(nav, name)
+  action follow(url: string)
+    nav = go(nav, url)
+  action setCategory(v: string)
+    category = v
+  action setSort(v: string)
+    sort = v
+  action setSearch(v: string)
+    search = v
+  action pickVariant(id: string)
+    picked = id
+    haptic("selection")
+  action stepQty(d: number, max: number)
+    qty = max(1, min(max, qty + d))
+  action addToCart(pid: string, vid: string, n: number, max: number)
+    cart = merged(cart, `${pid}|${vid}|${n}`, max)
+    added = true
+    addedN = addedN + 1
+    qty = 1
+    haptic("success")
+  action clearAdded
+    added = false
+  action stepLine(key: string, d: number)
+    cart = cart.map(l => keyOf(l) == key ? withQty(l, max(1, min(lineMax(products, l), qtyOf(l) + d))) : l)
+  action removeLine(key: string)
+    cart = cart.filter(l => keyOf(l) != key)
+  action clearCart
+    cart = []
+  action toCheckout
+    nav = push(nav, path("checkout"))
+
+  action editEmail(v: string)
+    coEmail = v
+  action editName(v: string)
+    coName = v
+  action editAddress(v: string)
+    coAddress = v
+  action editCity(v: string)
+    coCity = v
+  action editZip(v: string)
+    coZip = v
+  action editPhone(v: string)
+    coPhone = v
+  action setPayment(m: string)
+    coPayment = m
+    haptic("selection")
+  action placeOrder
+    if formReady and cart.length > 0 and not pending(placed)
+      now = performanceNow()
+      send placed = placeOrder(CheckoutForm(email=coEmail, name=coName, address=coAddress, city=coCity, zip=coZip, phone=coPhone, payment=coPayment), cart, time.epochAtZero + performanceNow())
+  action afterOrder
+    match placed
+      case some(r)
+        if r.ok
+          cart = []
+          let next = back(nav)
+          nav = open(next, path("order", r.id))
+          haptic("success")
+      case none
+        cart = cart
+
+  action setStatus(id: string, s: string)
+    send changed = setOrderStatus(id, s)
+  action setActive(id: string, on: bool)
+    send changed = setProductActive(id, on)
+
+  view
+    main navigationKey=`${top(nav).id}`
+      navigationBack="back"
+      navigate=follow
+      width="100%"
+      height="100%"
+      display="flex"
+      flex-direction="column"
+      column flex=1 min-height=0 position="relative"
+        for t in nav.tabs key = t.name
+          column role="tabpanel" id=`panel-${t.name}` position="absolute" inset=0
+            for e in t.stack key = e.id
+              column navigationKey=`${e.id}`
+                navigationScroll=`content-${e.id}`
+                position="absolute"
+                inset=0
+                display="flex"
+                flex-direction="column"
+                if e.name == "shop"
+                  header display="flex" align-items="center" padding="8px 16px"
+                    text "Store" role="heading" aria-level=1 flex=1
+                  scroll id=`content-${e.id}` flex=1 min-height=0
+                    column gap=16
+                      padding=16
+                      max-width="72rem"
+                      margin-left="auto"
+                      margin-right="auto"
+                      box-sizing="border-box"
+                      width="100%"
+                      input type="search"
+                        value=search
+                        input=setSearch
+                        placeholder="Search products"
+                        aria-label="Search products"
+                        testId="search"
+                      row gap=12 flex-wrap="wrap"
+                        select value=category
+                          change=setCategory
+                          aria-label="Category"
+                          flex="1 1 10rem"
+                          testId="category"
+                          option "All products" value=""
+                          for c in categories key = c.id
+                            option c.name value=c.id
+                        select value=sort
+                          change=setSort
+                          aria-label="Sort by"
+                          flex="1 1 10rem"
+                          testId="sort"
+                          option "Newest" value=""
+                          option "Price: low to high" value="price_asc"
+                          option "Price: high to low" value="price_desc"
+                          option "Name" value="name"
+                      text `${plural(shown.length, "product", "products")} found` font="-exact-footnote"
+                        color="-exact-secondary-label"
+                        testId="found"
+                      if shown.length == 0 and not pending(products)
+                        EmptyState(
+                          symbol="symbol:search",
+                          title="No products found",
+                          message="Try another category or search."
+                        )
+                      else
+                        column role="list"
+                          display="grid"
+                          grid-template-columns="repeat(auto-fill, minmax(min(100%, 10rem), 1fr))"
+                          gap=16
+                          testId="grid"
+                          for p in shown key = p.id
+                            ProductCard(
+                              p=p,
+                              add=addToCart(p.id, variantOr(p, ""), 1, stockOf(p, variantOr(p, "")))
+                            )
+
+                if e.name == "product"
+                  header display="flex" align-items="center" padding="8px 16px"
+                    text nameOf(products, e.params.slug) role="heading" aria-level=2
+                  scroll id=`content-${e.id}` flex=1 min-height=0
+                    if nameOf(products, e.params.slug) == "" and not pending(products)
+                      EmptyState(
+                        symbol="symbol:alert",
+                        title="Product not found",
+                        message="Its link may be out of date."
+                      )
+                    for p in bySlug(products, e.params.slug) key = p.id
+                      row flex-wrap="wrap"
+                        gap=24
+                        padding=16
+                        align-items="flex-start"
+                        max-width="72rem"
+                        margin-left="auto"
+                        margin-right="auto"
+                        box-sizing="border-box"
+                        width="100%"
+                        image p.image alt=p.name
+                          flex="1 1 18rem"
+                          min-width=0
+                          aspect-ratio="1"
+                          object-fit="cover"
+                          border-radius=16
+                          background-color="-exact-secondary-background"
+                        column flex="1 1 18rem" min-width=0 gap=16
+                          column gap=4
+                            link href="/"
+                              press=setCategory(p.categoryId)
+                              font="-exact-footnote"
+                              text-transform="uppercase"
+                              letter-spacing="0.06em"
+                              testId="product-category"
+                              text p.categoryName
+                            text p.name role="heading"
+                              aria-level=1
+                              font="-exact-title1"
+                              font-weight=700
+                              testId="product-name"
+                            row gap=10 align-items="baseline"
+                              text money(unitCents(p, variantOr(p, picked))) font="-exact-title2"
+                                font-weight=700
+                                font-variant-numeric="tabular-nums"
+                                testId="product-price"
+                              if p.compareCents > 0
+                                text money(p.compareCents) color="-exact-secondary-label"
+                                  text-decoration="line-through"
+                          row gap=12
+                            if p.type == "digital"
+                              text "Digital" font="-exact-caption1"
+                                font-weight=600
+                                color="-exact-system-blue"
+                            text (stockOf(p, variantOr(p, picked)) > 0 ? "In stock" : "Sold out") font="-exact-caption1"
+                              font-weight=600
+                              color=(stockOf(p, variantOr(p, picked)) > 0 ? "-exact-system-green" : "-exact-system-red")
+                              testId="stock"
+                          if p.variants.length > 0
+                            column gap=8
+                              text "Variant" font="-exact-subheadline"
+                                color="-exact-secondary-label"
+                                id="variant-label"
+                              row role="radiogroup"
+                                aria-labelledby="variant-label"
+                                gap=8
+                                flex-wrap="wrap"
+                                for v in p.variants key = v.id
+                                  button role="radio"
+                                    aria-checked=(variantOr(p, picked) == v.id)
+                                    disabled=(v.stock <= 0)
+                                    press=pickVariant(v.id)
+                                    buttonStyle=(variantOr(p, picked) == v.id ? "filled" : "bordered")
+                                    testId=`variant-${v.id}`
+                                    text v.name
+                          row gap=12 align-items="center"
+                            button press=stepQty(-1, stockOf(p, variantOr(p, picked)))
+                              disabled=(qty <= 1)
+                              aria-label="One fewer"
+                              buttonStyle="bordered"
+                              testId="qty-less"
+                              image "symbol:minus"
+                            text `${qty}` font-variant-numeric="tabular-nums"
+                              min-width=24
+                              text-align="center"
+                              testId="qty"
+                            button press=stepQty(1, stockOf(p, variantOr(p, picked)))
+                              disabled=(qty >= stockOf(p, variantOr(p, picked)))
+                              aria-label="One more"
+                              buttonStyle="bordered"
+                              testId="qty-more"
+                              image "symbol:add"
+                            button press=addToCart(p.id, variantOr(p, picked), qty, stockOf(p, variantOr(p, picked)))
+                              disabled=(stockOf(p, variantOr(p, picked)) <= 0)
+                              buttonStyle="filled"
+                              -exact-control-size="large"
+                              flex=1
+                              testId="add-to-cart"
+                              text (added ? "Added!" : stockOf(p, variantOr(p, picked)) <= 0 ? "Sold out" : "Add to cart")
+                          if stockOf(p, variantOr(p, picked)) > 0 and stockOf(p, variantOr(p, picked)) <= 5
+                            text `Only ${stockOf(p, variantOr(p, picked))} left` font="-exact-footnote"
+                              color="-exact-system-orange"
+                          column gap=6 padding-top=8
+                            text "Description" font="-exact-headline"
+                            text p.description color="-exact-secondary-label" line-height=1.5
+
+                if e.name == "cart"
+                  header display="flex" align-items="center" padding="8px 16px"
+                    text (cart.length == 0 ? "Cart" : `Cart (${cartCount})`) role="heading"
+                      aria-level=1
+                      flex=1
+                      testId="cart-title"
+                    button press=clearCart
+                      disabled=(cart.length == 0)
+                      destructive=true
+                      testId="clear"
+                      text "Clear"
+                  if cart.length == 0
+                    column id=`content-${e.id}` flex=1 min-height=0 justify-content="center"
+                      EmptyState(
+                        symbol="symbol:cart",
+                        title="Your cart is empty",
+                        message="What you add stays on this device until you check out."
+                      )
+                        link href="/" press=pick("shop") testId="back-to-store"
+                          text "Back to store"
+                  else
+                    list id=`content-${e.id}`
+                      appearance="auto"
+                      listStyle="inset-grouped"
+                      flex=1
+                      min-height=0
+                      section
+                        for l in cart key = keyOf(l)
+                          for p in productOf(products, part(l, 0)) key = p.id
+                            CartLine(
+                              name=p.name,
+                              variant=match first(p.variants.filter(v => v.id == part(l, 1))) { case some(v) => v.name, case none => "" },
+                              image=p.image,
+                              unit=unitCents(p, part(l, 1)),
+                              qty=qtyOf(l),
+                              max=stockOf(p, part(l, 1)),
+                              less=stepLine(keyOf(l), -1),
+                              more=stepLine(keyOf(l), 1),
+                              remove=removeLine(keyOf(l)),
+                              tid=p.slug
+                            )
+                      section
+                        Amount(label="Subtotal", value=money(subtotal), tid="subtotal")
+                        Amount(
+                          label="Shipping",
+                          value=(shipping == 0 ? "Free" : money(shipping)),
+                          tid="shipping"
+                        )
+                        row justify-content="space-between"
+                          text "Total" font-weight=700
+                          text money(subtotal + shipping) font-weight=700
+                            font-variant-numeric="tabular-nums"
+                            testId="cart-total"
+                        footer
+                          text (shipping > 0 ? `Add ${money(5000 - subtotal)} for free shipping` : "") testId="free-hint"
+                    column padding=16
+                      button press=toCheckout
+                        buttonStyle="filled"
+                        -exact-control-size="large"
+                        width="100%"
+                        testId="checkout"
+                        text "Checkout"
+
+                if e.name == "checkout"
+                  header display="flex" align-items="center" padding="8px 16px"
+                    text "Checkout" role="heading" aria-level=2
+                  list id=`content-${e.id}`
+                    appearance="auto"
+                    listStyle="inset-grouped"
+                    flex=1
+                    min-height=0
+                    section
+                      header
+                        text "Contact"
+                      row
+                        input type="email"
+                          value=coEmail
+                          input=editEmail
+                          placeholder="Email"
+                          aria-label="Email"
+                          autocomplete="email"
+                          inputmode="email"
+                          flex=1
+                          min-width=0
+                          testId="email"
+                    section
+                      header
+                        text "Shipping"
+                      row
+                        input value=coName
+                          input=editName
+                          placeholder="Full name"
+                          aria-label="Full name"
+                          autocomplete="name"
+                          flex=1
+                          min-width=0
+                          testId="name"
+                      row
+                        input value=coAddress
+                          input=editAddress
+                          placeholder="Address"
+                          aria-label="Address"
+                          autocomplete="street-address"
+                          flex=1
+                          min-width=0
+                          testId="address"
+                      row
+                        input value=coCity
+                          input=editCity
+                          placeholder="City"
+                          aria-label="City"
+                          autocomplete="address-level2"
+                          flex=1
+                          min-width=0
+                          testId="city"
+                      row
+                        input value=coZip
+                          input=editZip
+                          placeholder="ZIP code"
+                          aria-label="ZIP code"
+                          autocomplete="postal-code"
+                          flex=1
+                          min-width=0
+                          testId="zip"
+                      row
+                        input type="tel"
+                          value=coPhone
+                          input=editPhone
+                          placeholder="Phone (optional)"
+                          aria-label="Phone"
+                          autocomplete="tel"
+                          flex=1
+                          min-width=0
+                          testId="phone"
+                    section role="radiogroup" aria-label="Payment"
+                      header
+                        text "Payment"
+                      for m in ["card", "paypal", "cod"] key = m
+                        button role="radio"
+                          aria-checked=(coPayment == m)
+                          press=setPayment(m)
+                          testId=`pay-${m}`
+                          text (m == "cod" ? "Cash on delivery (+$3.00)" : paymentLabel(m)) flex=1
+                          if coPayment == m
+                            image "symbol:checkmark"
+                    section
+                      header
+                        text "Summary"
+                      for l in cart key = keyOf(l)
+                        for p in productOf(products, part(l, 0)) key = p.id
+                          Amount(
+                            label=`${p.name} × ${qtyOf(l)}`,
+                            value=money(lineCents(products, l)),
+                            tid=`sum-${p.slug}`
+                          )
+                      Amount(label="Subtotal", value=money(subtotal), tid="co-subtotal")
+                      Amount(
+                        label="Shipping",
+                        value=(shipping == 0 ? "Free" : money(shipping)),
+                        tid="co-shipping"
+                      )
+                      if fee > 0
+                        Amount(label="COD fee", value=money(fee), tid="co-fee")
+                      row justify-content="space-between"
+                        text "Total" font-weight=700
+                        text money(total) font-weight=700
+                          font-variant-numeric="tabular-nums"
+                          testId="co-total"
+                      footer
+                        text (placeError != "" ? placeError : formReady ? "No payment is taken: this is a demo store." : "Fill in your email, name, address, city and ZIP code to order.") testId="co-hint"
+                  column padding=16
+                    button press=placeOrder
+                      disabled=(not formReady or cart.length == 0 or pending(placed))
+                      buttonStyle="filled"
+                      -exact-control-size="large"
+                      width="100%"
+                      testId="place"
+                      text (pending(placed) ? "Processing…" : "Complete order")
+
+                if e.name == "orders"
+                  header display="flex" align-items="center" padding="8px 16px"
+                    text "My Orders" role="heading" aria-level=1
+                  if orders.length == 0 and not pending(orders)
+                    column id=`content-${e.id}` flex=1 min-height=0 justify-content="center"
+                      EmptyState(
+                        symbol="symbol:package",
+                        title="No orders yet",
+                        message="Orders you place appear here."
+                      )
+                        link href="/" press=pick("shop") testId="browse"
+                          text "Browse products"
+                  else
+                    list id=`content-${e.id}`
+                      appearance="auto"
+                      listStyle="inset-grouped"
+                      flex=1
+                      min-height=0
+                      section
+                        for o in orders key = o.id
+                          OrderRow(o=o, placedOn=formatDay(o.at, clock, time.utcOffset, "day"))
+
+                if e.name == "order"
+                  header display="flex" align-items="center" padding="8px 16px"
+                    text "Order" role="heading" aria-level=2
+                  if orders.filter(o => o.id == e.params.id).length == 0 and not pending(orders)
+                    column id=`content-${e.id}` flex=1 min-height=0 justify-content="center"
+                      EmptyState(
+                        symbol="symbol:alert",
+                        title="Order not found",
+                        message="It may have been placed on another device."
+                      )
+                  else
+                    list id=`content-${e.id}`
+                      appearance="auto"
+                      listStyle="inset-grouped"
+                      flex=1
+                      min-height=0
+                      for o in orders.filter(x => x.id == e.params.id) key = o.id
+                        section background-color="transparent"
+                          column align-items="center" gap=8 padding-top=8
+                            image "symbol:select-fill" font-size="3rem"
+                              color="-exact-system-green"
+                              aria-hidden=true
+                            text "Order Confirmed!" role="heading"
+                              aria-level=1
+                              font="-exact-title2"
+                              font-weight=700
+                              testId="confirmed"
+                            text `Thank you for your order. We've sent a confirmation to ${o.email}` text-align="center"
+                              color="-exact-secondary-label"
+                        section
+                          Amount(label="Order number", value=o.number, tid="order-number")
+                          Amount(
+                            label="Date",
+                            value=formatDay(o.at, clock, time.utcOffset, "day-time"),
+                            tid="order-date"
+                          )
+                          row justify-content="space-between"
+                            text "Status" color="-exact-secondary-label"
+                            StatusBadge(status=o.status)
+                          Amount(
+                            label="Payment",
+                            value=`${paymentLabel(o.paymentMethod)} · ${o.paymentStatus == "paid" ? "Paid" : "Pending"}`,
+                            tid="order-payment"
+                          )
+                        section
+                          header
+                            text "Shipping to"
+                          column gap=2
+                            text o.name
+                            text o.address color="-exact-secondary-label"
+                        section
+                          header
+                            text "Items"
+                          for it, i in o.items key = it.name
+                            Amount(
+                              label=`${it.name} × ${it.quantity}`,
+                              value=money(it.priceCents * it.quantity),
+                              tid=`item-${i}`
+                            )
+                          Amount(label="Subtotal", value=money(o.subtotalCents), tid="o-subtotal")
+                          Amount(
+                            label="Shipping",
+                            value=(o.shippingCents == 0 ? "Free" : money(o.shippingCents)),
+                            tid="o-shipping"
+                          )
+                          if o.feeCents > 0
+                            Amount(label="COD fee", value=money(o.feeCents), tid="o-fee")
+                          row justify-content="space-between"
+                            text "Total" font-weight=700
+                            text money(o.totalCents) font-weight=700
+                              font-variant-numeric="tabular-nums"
+                              testId="o-total"
+
+                if e.name == "dashboard"
+                  header display="flex" align-items="center" padding="8px 16px"
+                    text "Dashboard" role="heading" aria-level=1
+                  list id=`content-${e.id}`
+                    appearance="auto"
+                    listStyle="inset-grouped"
+                    flex=1
+                    min-height=0
+                    section
+                      Amount(label="Revenue", value=money(liveRevenue(orders)), tid="revenue")
+                      Amount(label="Orders", value=`${orders.length}`, tid="order-count")
+                      Amount(
+                        label="Awaiting payment",
+                        value=`${orders.filter(o => o.paymentStatus == "pending").length}`,
+                        tid="unpaid"
+                      )
+                      Amount(
+                        label="Active products",
+                        value=`${products.filter(p => p.active).length} of ${products.length}`,
+                        tid="active-count"
+                      )
+                    section
+                      header
+                        text "Orders"
+                      for o in orders key = o.id
+                        row gap=12 align-items="center"
+                          column flex=1 min-width=0 gap=2
+                            text `${o.number} · ${o.name}` font-weight=600
+                            text `${money(o.totalCents)} · ${paymentLabel(o.paymentMethod)}` font="-exact-footnote"
+                              color="-exact-secondary-label"
+                          select value=o.status
+                            change=setStatus(o.id)
+                            aria-label=`Status of ${o.number}`
+                            testId=`status-${o.number}`
+                            option "Pending" value="pending"
+                            option "Processing" value="processing"
+                            option "Shipped" value="shipped"
+                            option "Delivered" value="delivered"
+                            option "Cancelled" value="cancelled"
+                      footer
+                        text (orders.length == 0 ? "No orders yet." : "")
+                    section
+                      header
+                        text "Products"
+                      for p in products key = p.id
+                        row gap=12 align-items="center"
+                          image p.image alt="" width=40 height=40 object-fit="cover" border-radius=6
+                          column flex=1 min-width=0 gap=2
+                            text p.name
+                            text `${money(p.priceCents)} · ${p.sku} · ${p.stock} in stock` font="-exact-footnote"
+                              color="-exact-secondary-label"
+                          input type="checkbox" switch
+                            checked=p.active
+                            change=setActive(p.id)
+                            aria-label=`${p.name} active`
+                            testId=`active-${p.slug}`
+
+      row role="tablist"
+        button role="tab"
+          aria-controls="panel-shop"
+          aria-selected=(nav.tab == "shop")
+          press=pick("shop")
+          flex=1
+          testId="tab-shop"
+          image "symbol:home"
+          text "Shop"
+        button role="tab"
+          aria-controls="panel-cart"
+          aria-selected=(nav.tab == "cart")
+          press=pick("cart")
+          flex=1
+          testId="tab-cart"
+          image "symbol:cart"
+          text (cartCount == 0 ? "Cart" : `Cart (${cartCount})`)
+        button role="tab"
+          aria-controls="panel-orders"
+          aria-selected=(nav.tab == "orders")
+          press=pick("orders")
+          flex=1
+          testId="tab-orders"
+          image "symbol:package"
+          text "Orders"
+        button role="tab"
+          aria-controls="panel-dashboard"
+          aria-selected=(nav.tab == "dashboard")
+          press=pick("dashboard")
+          flex=1
+          testId="tab-dashboard"
+          image "symbol:chart"
+          text "Dashboard"

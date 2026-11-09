@@ -1,0 +1,101 @@
+// The store's records and the arithmetic over them. Money is whole cents.
+
+shape Time
+  epochAtZero: number
+  utcOffset: number
+
+shape Category
+  id: string
+  name: string
+  slug: string
+
+shape Variant
+  id: string
+  name: string
+  priceCents: number
+  stock: number
+
+shape Product
+  id: string
+  name: string
+  slug: string
+  description: string
+  priceCents: number
+  compareCents: number
+  type: string
+  categoryId: string
+  categoryName: string
+  sku: string
+  stock: number
+  featured: bool
+  image: string
+  variants: Variant[]
+  active: bool
+
+shape OrderItem
+  name: string
+  quantity: number
+  priceCents: number
+
+shape Order
+  id: string
+  number: string
+  status: string
+  paymentStatus: string
+  paymentMethod: string
+  email: string
+  name: string
+  address: string
+  phone: string
+  items: OrderItem[]
+  subtotalCents: number
+  shippingCents: number
+  feeCents: number
+  totalCents: number
+  at: number
+
+shape CheckoutForm
+  email: string
+  name: string
+  address: string
+  city: string
+  zip: string
+  phone: string
+  payment: string
+
+shape Reply
+  ok: bool
+  error: string
+  id: string
+
+fn money(cents: number): string = formatNumber(cents / 100, "currency", "USD")
+fn plural(n: number, one: string, many: string): string = `${n} ${n == 1 ? one : many}`
+
+// A cart line is `productId|variantId|qty`: the same product and variant is the same line.
+fn part(l: string, i: number): string = match l.split("|").at(i) { case some(s) => s, case none => "" }
+fn keyOf(l: string): string = `${part(l, 0)}|${part(l, 1)}`
+fn qtyOf(l: string): number = match parseNumber(part(l, 2)) { case some(n) => n, case none => 1 }
+fn withQty(l: string, n: number): string = `${keyOf(l)}|${n}`
+fn merged(cart: string[], line: string, max: number): string[] = cart.filter(l => keyOf(l) == keyOf(line)).length == 0 ? cart.concat([line]) : cart.map(l => keyOf(l) == keyOf(line) ? withQty(l, min(max, qtyOf(l) + qtyOf(line))) : l)
+
+fn productOf(ps: Product[], id: string): Product[] = ps.filter(p => p.id == id)
+fn bySlug(ps: Product[], slug: string): Product[] = ps.filter(p => p.slug == slug and p.active)
+fn nameOf(ps: Product[], slug: string): string = match first(bySlug(ps, slug)) { case some(p) => p.name, case none => "" }
+fn variantOf(p: Product, id: string): Variant[] = p.variants.filter(v => v.id == id)
+fn unitCents(p: Product, vid: string): number = match first(variantOf(p, vid)) { case some(v) => v.priceCents > 0 ? v.priceCents : p.priceCents, case none => p.priceCents }
+fn stockOf(p: Product, vid: string): number = match first(variantOf(p, vid)) { case some(v) => v.stock, case none => p.stock }
+fn firstVariant(p: Product): string = match first(p.variants.filter(v => v.stock > 0)) { case some(v) => v.id, case none => "" }
+// The variant picked on this page, or the first one in stock.
+fn variantOr(p: Product, picked: string): string = p.variants.filter(v => v.id == picked and v.stock > 0).length > 0 ? picked : firstVariant(p)
+
+fn lineCents(ps: Product[], l: string): number = match first(productOf(ps, part(l, 0))) { case some(p) => unitCents(p, part(l, 1)) * qtyOf(l), case none => 0 }
+fn lineMax(ps: Product[], l: string): number = match first(productOf(ps, part(l, 0))) { case some(p) => stockOf(p, part(l, 1)), case none => 1 }
+fn subtotalOf(ps: Product[], cart: string[]): number = sum(cart.map(l => lineCents(ps, l)))
+fn countAll(cart: string[]): number = sum(cart.map(l => qtyOf(l)))
+fn shippingFor(subtotal: number): number = subtotal >= 5000 ? 0 : 599
+fn feeFor(payment: string): number = payment == "cod" ? 300 : 0
+
+fn paymentLabel(m: string): string = m == "card" ? "Credit card" : m == "paypal" ? "PayPal" : m == "cod" ? "Cash on delivery" : m
+fn statusLabel(s: string): string = s == "" ? "" : `${s.slice(0, 1).toUpperCase()}${s.slice(1)}`
+fn statusColor(s: string): string = s == "pending" ? "-exact-system-orange" : s == "processing" ? "-exact-system-blue" : s == "shipped" ? "-exact-system-indigo" : s == "delivered" ? "-exact-system-green" : "-exact-system-red"
+fn liveRevenue(os: Order[]): number = sum(os.filter(o => o.status != "cancelled").map(o => o.totalCents))

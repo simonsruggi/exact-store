@@ -1,90 +1,56 @@
-# Next Store
+# Exact Store
 
-An open-source e-commerce platform built with Next.js, Tailwind CSS, Supabase, and Stripe.
+A demo e-commerce store written with [Exact](https://github.com/expo/exact), Expo's runtime that builds one
+app for the web, iOS and macOS. It is a port of this repository's earlier Next.js version (tag
+[`nextjs-version`](https://github.com/simonsruggi/exact-store/tree/nextjs-version)).
 
-**[Live Demo](https://next-store-simonsruggis-projects.vercel.app)**
+**[Live demo](https://exact-store.vercel.app)**
 
 ## Features
 
-- **Storefront**: Full-featured e-commerce frontend with product catalog, search, filters
-- **Shopping Cart**: Persistent cart with localStorage and sync for logged-in users
-- **Checkout**: Multi-step checkout with address management
-- **Payments**: Stripe, PayPal, and Cash on Delivery (COD)
-- **Digital Products**: Secure download links with expiration and download limits
-- **User Accounts**: Registration, login, password reset, order history
-- **Admin Dashboard**: Complete CRUD for products, orders, customers, shipping
-- **Authentication**: Supabase Auth with role-based access (customer/admin)
-- **Security**: Row Level Security (RLS) on all database tables
+- **Shop**: product grid, search, category filter, sort by price or name
+- **Product page**: variants, quantity, stock, compare-at price, deep links (`/product/<slug>`)
+- **Cart**: quantities, remove, clear, free shipping from $50, kept on the device
+- **Checkout**: contact and shipping form, credit card, PayPal or cash on delivery (+$3)
+- **Orders**: order confirmation and history
+- **Dashboard**: revenue, unpaid orders, order status, products switched on and off
 
-## Tech Stack
+This is a demo: no payment is taken and nothing ships. Orders and the cart stay in the browser.
 
-- **Framework**: Next.js 15+ (App Router)
-- **UI**: Tailwind CSS
-- **Database**: Supabase (PostgreSQL)
-- **Auth**: Supabase Auth
-- **Payments**: Stripe + PayPal
-- **State Management**: Zustand
-- **Language**: TypeScript
+## How it is built
 
-## Getting Started
+| File | What it holds |
+|---|---|
+| `app.contract` | The screens: routes, state, actions and views, in Contract |
+| `model.contract` | Records (`shape`s) and the cart and price arithmetic |
+| `parts.contract` | Repeated pieces: product card, cart line, order row |
+| `app.ts` | The data module: catalog, orders, status changes, kept in a file |
+| `catalog.ts` | The demo catalog, prices in cents |
+| `app.test.contract` | Tests that run unchanged on web, iOS and macOS |
 
-### Prerequisites
+Order totals are computed again in `app.ts` from the catalog, never taken from the screen.
 
-- Node.js 20+
-- npm or yarn
-- Supabase account
-- Stripe account
-- PayPal developer account (optional)
+## Run it
 
-### 1. Clone the repository
+Exact has no npm package yet: an app uses a checkout of it by path.
 
-```bash
-git clone https://github.com/yourusername/next-store.git
-cd next-store
+```sh
+git clone https://github.com/expo/exact.git ../../tools/exact   # or set EXACT2=<path>
+bun ../../tools/exact/scripts/exact.mjs setup                   # once
+bun exact.mjs web                                               # http://127.0.0.1:8765/
+bun exact.mjs test web                                          # the tests
+bun exact.mjs ios --run                                         # an iOS Simulator
 ```
 
-### 2. Install dependencies
+## Deploy
 
-```bash
-npm install
-```
+The site is static. `bun run build` writes it to `dist/` with a `vercel.json` that serves the app's routes,
+and `bun run deploy` publishes `dist/` to Vercel.
 
-### 3. Set up Supabase
+## Disclaimer
 
-1. Create a new project at [supabase.com](https://supabase.com)
-2. Go to SQL Editor and run the migration file from `supabase/migrations/001_initial_schema.sql`
-3. (Optional) Run `supabase/seed.sql` to add sample products
-4. Copy your project URL and keys from Settings > API
-
-### 4. Set up environment variables
-
-Create a `.env.local` file and add the required environment variables.
-
-See `docs/environment-variables.md` for the complete list.
-
-### 5. Create an admin user
-
-1. Register a new user through the app at `/register`
-2. In Supabase Dashboard, go to Table Editor > profiles
-3. Find your user and change `role` from `customer` to `admin`
-
-### 6. Run the development server
-
-```bash
-npm run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000) to see the storefront.
-Open [http://localhost:3000/dashboard](http://localhost:3000/dashboard) to access the admin dashboard.
-
-## Deployment
-
-### Vercel
-
-1. Push your code to GitHub
-2. Import the repository in Vercel
-3. Add all environment variables
-4. Deploy
+Product photos come from [Unsplash](https://unsplash.com). Product names and prices are made up. Not affiliated
+with Expo or Vercel.
 
 ## License
 
@@ -92,4 +58,4 @@ MIT License
 
 ---
 
-next-store is free and open source. If you find it useful, please [⭐️ star the repo](https://github.com/simonsruggi/next-store) — and if you'd like to support my open-source work, you can [💛 sponsor me on GitHub](https://github.com/sponsors/simonsruggi) or [☕️ buy me a coffee](https://buymeacoffee.com/simonsruggi). Completely optional, always appreciated. 🙏
+exact-store is free and open source. If you find it useful, please [⭐️ star the repo](https://github.com/simonsruggi/exact-store) — and if you'd like to support my open-source work, you can [💛 sponsor me on GitHub](https://github.com/sponsors/simonsruggi) or [☕️ buy me a coffee](https://buymeacoffee.com/simonsruggi). Completely optional, always appreciated. 🙏

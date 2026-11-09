@@ -1,0 +1,71 @@
+test "the shop filters by category and search, and sorts by price"
+  clock data
+  expect text "found" == "10 products found"
+  type "category" "cat-2"
+  expect text "found" == "3 products found"
+  type "category" ""
+  type "search" "lamp"
+  expect text "found" == "1 product found"
+  expect tree has "card-smart-led-lamp"
+  type "search" "zzz"
+  expect text "found" == "0 products found"
+
+test "a variant is picked and added; the cart totals it with shipping"
+  clock data
+  tap "open-basic-t-shirt"
+  clock data
+  expect text "product-price" == "$29.99"
+  tap "variant-var-3"
+  tap "qty-more"
+  tap "add-to-cart"
+  expect text "add-to-cart" == "Added!"
+  clock +2000
+  expect text "add-to-cart" == "Add to cart"
+  tap "tab-cart"
+  clock data
+  expect text "cart-title" == "Cart (2)"
+  expect text "total-basic-t-shirt" == "$59.98"
+  expect text "shipping" == "Free"
+  tap "less-basic-t-shirt"
+  expect text "shipping" == "$5.99"
+  expect text "free-hint" == "Add $20.01 for free shipping"
+  expect text "cart-total" == "$35.98"
+
+test "checkout places an order, the cart empties and the dashboard moves it on"
+  clock data
+  tap "add-hoodie"
+  tap "tab-cart"
+  tap "checkout"
+  clock settle
+  expect disabled "place"
+  type "email" "ada@example.com"
+  type "name" "Ada Lovelace"
+  type "address" "Via Roma 1"
+  type "city" "Napoli"
+  type "zip" "80100"
+  tap "pay-cod"
+  expect text "co-fee" == "$3.00"
+  expect text "co-total" == "$62.99"
+  tap "place"
+  clock data
+  clock settle
+  expect text "confirmed" == "Order Confirmed!"
+  expect text "order-number" == "ORD-0001"
+  expect text "o-total" == "$62.99"
+  expect state cart.length == 0
+  tap "tab-dashboard"
+  clock data
+  expect text "revenue" == "$62.99"
+  expect text "unpaid" == "1"
+  type "status-ORD-0001" "cancelled"
+  clock data
+  expect text "revenue" == "$0.00"
+
+test "a product switched off leaves the shop"
+  tap "tab-dashboard"
+  clock data
+  tap "active-hoodie"
+  clock data
+  expect text "active-count" == "9 of 10"
+  tap "tab-shop"
+  expect tree missing "card-hoodie"

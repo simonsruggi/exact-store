@@ -1,0 +1,20 @@
+{
+  "$schema": "../../tools/exact/scripts/app.schema.json",
+  "name": "Exact Store",
+  "short_name": "Exact Store",
+  "id": "com.simoneruggiero.exactstore",
+  "start_url": "/",
+  "display": "standalone",
+  "app": {
+    "id": "com.simoneruggiero.exactstore",
+    "name": "Exact Store"
+  },
+  "host": {
+    "web": {}
+  },
+  "deploy": {
+    "store": {
+      "web": "0"
+    }
+  }
+}
